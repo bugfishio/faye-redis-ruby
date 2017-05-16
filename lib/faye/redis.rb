@@ -40,6 +40,7 @@ module Faye
       #@subscriber.subscribe(@message_channel)
       @subscriber.subscribe(@close_channel)
       @subscriber.on(:message) do |topic, message|
+        puts "redis.on(#{topic}, #{message})"
         #empty_queue(message) if topic == @message_channel
         @server.trigger(:close, message) if topic == @close_channel
       end
@@ -138,6 +139,7 @@ module Faye
     end
 
     def subscribe(client_id, channel, &callback)
+      puts "subscribe(#{client_id}, #{channel})"
       init
       if added == 1
         @redis.sadd(@ns + "/clients/#{client_id}/channels", channel) do |added|
@@ -157,6 +159,7 @@ module Faye
     end
 
     def unsubscribe(client_id, channel, &callback)
+      puts "unsubscribe(#{client_id}, #{channel})"
       init
       @subscriber.unsubscribe("#{@ns}/channels/#{channel}")
       @redis.srem(@ns + "/clients/#{client_id}/channels", channel) do |removed|
@@ -169,6 +172,7 @@ module Faye
     end
 
     def publish(message, channels)
+      puts "publish(#{message}, #{channels})"
       init
       @server.debug 'Publishing message ?', message
 
