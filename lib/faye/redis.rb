@@ -34,13 +34,13 @@ module Faye
       end
       @subscriber = @redis.pubsub
 
-      @message_channel = @ns + '/notifications/messages'
+      #@message_channel = @ns + '/notifications/messages'
       @close_channel   = @ns + '/notifications/close'
 
-      @subscriber.subscribe(@message_channel)
+      #@subscriber.subscribe(@message_channel)
       @subscriber.subscribe(@close_channel)
       @subscriber.on(:message) do |topic, message|
-        empty_queue(message) if topic == @message_channel
+        #empty_queue(message) if topic == @message_channel
         @server.trigger(:close, message) if topic == @close_channel
       end
 
@@ -73,7 +73,7 @@ module Faye
 
     def disconnect
       return unless @redis
-      @subscriber.unsubscribe(@message_channel)
+      #@subscriber.unsubscribe(@message_channel)
       @subscriber.unsubscribe(@close_channel)
       EventMachine.cancel_timer(@gc)
     end
@@ -117,14 +117,14 @@ module Faye
     end
 
     def after_subscriptions_removed(client_id, &callback)
-      @redis.del(@ns + "/clients/#{client_id}/messages") do
+      #@redis.del(@ns + "/clients/#{client_id}/messages") do
         @redis.zrem(@ns + '/clients', client_id) do
           @server.debug 'Destroyed client ?', client_id
           @server.trigger(:disconnect, client_id)
           @redis.publish(@close_channel, client_id)
           callback.call if callback
         end
-      end
+      #end
     end
 
     def ping(client_id)
@@ -139,24 +139,33 @@ module Faye
 
     def subscribe(client_id, channel, &callback)
       init
-      @redis.sadd(@ns + "/clients/#{client_id}/channels", channel) do |added|
-        @server.trigger(:subscribe, client_id, channel) if added == 1
+      if added == 1
+        @redis.sadd(@ns + "/clients/#{client_id}/channels", channel) do |added|
+          @subscriber.subscribe("#{@ns}/channels/#{channel}").callback do
+            @server.trigger(:subscribe, client_id, channel)
+          end
+        end.on do |msg|
+          message = msg.map { |json| MultiJson.load(json) }
+          @server.deliver(client_id, message)
+        end
       end
-      @redis.sadd(@ns + "/channels#{channel}", client_id) do
-        @server.debug 'Subscribed client ? to channel ?', client_id, channel
-        callback.call if callback
-      end
+
+      #@redis.sadd(@ns + "/channels#{channel}", client_id) do
+      #  @server.debug 'Subscribed client ? to channel ?', client_id, channel
+      #  callback.call if callback
+      #end
     end
 
     def unsubscribe(client_id, channel, &callback)
       init
+      @subscriber.unsubscribe("#{@ns}/channels/#{channel}")
       @redis.srem(@ns + "/clients/#{client_id}/channels", channel) do |removed|
         @server.trigger(:unsubscribe, client_id, channel) if removed == 1
       end
-      @redis.srem(@ns + "/channels#{channel}", client_id) do
-        @server.debug 'Unsubscribed client ? from channel ?', client_id, channel
-        callback.call if callback
-      end
+      #@redis.srem(@ns + "/channels#{channel}", client_id) do
+      #  @server.debug 'Unsubscribed client ? from channel ?', client_id, channel
+      #  callback.call if callback
+      #end
     end
 
     def publish(message, channels)
@@ -165,42 +174,47 @@ module Faye
 
       json_message = MultiJson.dump(message)
       channels     = Channel.expand(message['channel'])
-      keys         = channels.map { |c| @ns + "/channels#{c}" }
+      channels.each do |channel|
+        @subscriber.publish("#{@ns}/channels/#{channel}")
 
-      @redis.sunion(*keys) do |clients|
-        clients.each do |client_id|
-          queue = @ns + "/clients/#{client_id}/messages"
-
-          @server.debug 'Queueing for client ?: ?', client_id, message
-          @redis.rpush(queue, json_message)
-          @redis.publish(@message_channel, client_id)
-
-          client_exists(client_id) do |exists|
-            @redis.del(queue) unless exists
-          end
-        end
       end
+      #keys         = channels.map { |c| @ns + "/channels/#{c}" }
+
+      #@redis.sunion(*keys) do |clients|
+      #  clients.each do |client_id|
+      #    queue = @ns + "/clients/#{client_id}/messages"
+
+      #    @server.debug 'Queueing for client ?: ?', client_id, message
+      #    @redis.rpush(queue, json_message)
+      #    @redis.publish(@message_channel, client_id)
+
+      #    client_exists(client_id) do |exists|
+      #      @redis.del(queue) unless exists
+      #    end
+      #  end
+      #end
+
 
       @server.trigger(:publish, message['clientId'], message['channel'], message['data'])
     end
 
-    def empty_queue(client_id)
-      return unless @server.has_connection?(client_id)
-      init
+    #def empty_queue(client_id)
+    #  return unless @server.has_connection?(client_id)
+    #  init
 
-      key = @ns + "/clients/#{client_id}/messages"
+    #  key = @ns + "/clients/#{client_id}/messages"
 
-      @redis.multi
-      @redis.lrange(key, 0, -1)
-      @redis.del(key)
-      @redis.exec.callback  do |json_messages, deleted|
-        next unless json_messages
-        messages = json_messages.map { |json| MultiJson.load(json) }
-        if not @server.deliver(client_id, messages)
-          @redis.rpush(key, *json_messages)
-        end
-      end
-    end
+    #  @redis.multi
+    #  @redis.lrange(key, 0, -1)
+    #  @redis.del(key)
+    #  @redis.exec.callback  do |json_messages, deleted|
+    #    next unless json_messages
+    #    messages = json_messages.map { |json| MultiJson.load(json) }
+    #    if not @server.deliver(client_id, messages)
+    #      @redis.rpush(key, *json_messages)
+    #    end
+    #  end
+    #end
 
   private
 
