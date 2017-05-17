@@ -144,8 +144,8 @@ module Faye
       @redis.sadd(@ns + "/clients/#{client_id}/channels", channel) do |added|
         @subscriber.subscribe("#{@ns}/channels#{channel}") do |msg|
           puts "received message(#{client_id}, #{channel}, #{msg})"
-          message = msg.map { |json| MultiJson.load(json) }
-          @server.deliver(client_id, message)
+          message = MultiJson.load(msg)
+          @server.deliver(client_id, [message])
         end
         @server.trigger(:subscribe, client_id, channel)
       end
@@ -177,9 +177,11 @@ module Faye
       json_message = MultiJson.dump(message)
       channels     = Channel.expand(message['channel'])
       channels.each do |channel|
-        puts "publish(#{message}, #{channel})"
-        @subscriber.publish("#{@ns}/channels#{channel}")
-
+        puts "publish(#{json_message}, #{@ns}/channels#{channel})"
+        @redis.publish("#{@ns}/channels#{channel}", json_message).errback do |e|
+          puts "publish error channel #{@ns}/channels#{channel}"
+          puts e.inspect
+        end
       end
       #keys         = channels.map { |c| @ns + "/channels/#{c}" }
 
