@@ -40,7 +40,6 @@ module Faye
       #@subscriber.subscribe(@message_channel)
       @subscriber.subscribe(@close_channel)
       @subscriber.on(:message) do |topic, message|
-        puts "redis.on(#{topic}, #{message})"
         #empty_queue(message) if topic == @message_channel
         @server.trigger(:close, message) if topic == @close_channel
       end
@@ -139,11 +138,9 @@ module Faye
     end
 
     def subscribe(client_id, channel, &callback)
-      puts "subscribe(#{client_id}, #{channel})"
       init
       @redis.sadd(@ns + "/clients/#{client_id}/channels", channel) do |added|
         @subscriber.subscribe("#{@ns}/channels#{channel}") do |msg|
-          puts "received message(#{client_id}, #{channel}, #{msg})"
           message = MultiJson.load(msg)
           @server.deliver(client_id, [message])
         end
@@ -157,7 +154,6 @@ module Faye
     end
 
     def unsubscribe(client_id, channel, &callback)
-      puts "unsubscribe(#{client_id}, #{channel})"
       init
       @subscriber.unsubscribe("#{@ns}/channels/#{channel}")
       @redis.srem(@ns + "/clients/#{client_id}/channels", channel) do |removed|
@@ -170,14 +166,12 @@ module Faye
     end
 
     def publish(message, channels)
-      puts "publish(#{message}, #{channels})"
       init
       @server.debug 'Publishing message ?', message
 
       json_message = MultiJson.dump(message)
       channels     = Channel.expand(message['channel'])
       channels.each do |channel|
-        puts "publish(#{json_message}, #{@ns}/channels#{channel})"
         @redis.publish("#{@ns}/channels#{channel}", json_message).errback do |e|
           puts "publish error channel #{@ns}/channels#{channel}"
           puts e.inspect
