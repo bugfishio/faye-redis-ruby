@@ -59,7 +59,7 @@ module Faye
       @redis.on(:disconnected) do
         @server.info "Faye::Redis: redis disconnected"
         @redis = nil
-        raise "disconnected from redis"
+        #raise "disconnected from redis"
       end
       @redis.on(:connected) do
         @server.info "Faye::Redis: redis connected"
@@ -141,15 +141,13 @@ module Faye
     def subscribe(client_id, channel, &callback)
       puts "subscribe(#{client_id}, #{channel})"
       init
-      if added == 1
-        @redis.sadd(@ns + "/clients/#{client_id}/channels", channel) do |added|
-          @subscriber.subscribe("#{@ns}/channels/#{channel}").callback do
-            @server.trigger(:subscribe, client_id, channel)
-          end
-        end.on do |msg|
+      @redis.sadd(@ns + "/clients/#{client_id}/channels", channel) do |added|
+        @subscriber.subscribe("#{@ns}/channels#{channel}") do |msg|
+          puts "received message(#{client_id}, #{channel}, #{msg})"
           message = msg.map { |json| MultiJson.load(json) }
           @server.deliver(client_id, message)
         end
+        @server.trigger(:subscribe, client_id, channel)
       end
 
       #@redis.sadd(@ns + "/channels#{channel}", client_id) do
@@ -179,7 +177,8 @@ module Faye
       json_message = MultiJson.dump(message)
       channels     = Channel.expand(message['channel'])
       channels.each do |channel|
-        @subscriber.publish("#{@ns}/channels/#{channel}")
+        puts "publish(#{message}, #{channel})"
+        @subscriber.publish("#{@ns}/channels#{channel}")
 
       end
       #keys         = channels.map { |c| @ns + "/channels/#{c}" }
@@ -202,9 +201,9 @@ module Faye
       @server.trigger(:publish, message['clientId'], message['channel'], message['data'])
     end
 
-    #def empty_queue(client_id)
-    #  return unless @server.has_connection?(client_id)
-    #  init
+    def empty_queue(client_id)
+      return unless @server.has_connection?(client_id)
+      init
 
     #  key = @ns + "/clients/#{client_id}/messages"
 
@@ -218,7 +217,7 @@ module Faye
     #      @redis.rpush(key, *json_messages)
     #    end
     #  end
-    #end
+    end
 
   private
 
