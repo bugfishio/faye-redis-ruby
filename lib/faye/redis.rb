@@ -81,7 +81,7 @@ module Faye
     def create_client(&callback)
       init
       client_id = @server.generate_id
-      @redis.zadd(@ns + '/clients', get_current_time, client_id) do |added|
+      @redis.zadd("#{@ns}/clients/#{client_id[0,1]}", get_current_time, client_id) do |added|
         next create_client(&callback) if added == 0
         @server.debug 'Created new client ?', client_id
         ping(client_id)
@@ -94,14 +94,14 @@ module Faye
       init
       cutoff = get_current_time - (1000 * timeout_multiplier * @server.timeout)
 
-      @redis.zscore(@ns + '/clients', client_id) do |score|
+      @redis.zscore("#{@ns}/clients/#{client_id[0,1]}", client_id) do |score|
         callback.call(score.to_i > cutoff)
       end
     end
 
     def destroy_client(client_id, &callback)
       init
-      @redis.zadd(@ns + '/clients', 0, client_id) do
+      @redis.zadd("#{@ns}/clients#{client_id[0,1]}", 0, client_id) do
         @redis.smembers(@ns + "/clients/#{client_id}/channels") do |channels|
           i, n = 0, channels.size
           next after_subscriptions_removed(client_id, &callback) if i == n
@@ -118,7 +118,7 @@ module Faye
 
     def after_subscriptions_removed(client_id, &callback)
       @redis.del(@ns + "/clients/#{client_id}/messages") do
-        @redis.zrem(@ns + '/clients', client_id) do
+        @redis.zrem("#{@ns}/clients/#{client_id[0,1]}", client_id) do
           @server.debug 'Destroyed client ?', client_id
           @server.trigger(:disconnect, client_id)
           @redis.publish(@close_channel, client_id)
@@ -134,7 +134,7 @@ module Faye
 
       time = get_current_time
       @server.debug 'Ping ?, ?', client_id, time
-      @redis.zadd(@ns + '/clients', time, client_id)
+      @redis.zadd("#{@ns}/clients/#{client_id[0,1]}", time, client_id)
     end
 
     def subscribe(client_id, channel, &callback)
@@ -212,16 +212,18 @@ module Faye
       timeout = @server.timeout
       return unless Numeric === timeout
 
-      with_lock 'gc' do |release_lock|
-        cutoff = get_current_time - 1000 * 2 * timeout
-        @redis.zrangebyscore(@ns + '/clients', 0, cutoff) do |clients|
-          i, n = 0, clients.size
-          next release_lock.call if i == n
+      'abcdefghijklmnopqrstuvwxyz1234567890'.each_char do |c|
+        with_lock 'gc' do |release_lock|
+          cutoff = get_current_time - 1000 * 2 * timeout
+          @redis.zrangebyscore("#{@ns}/clients/#{c}", 0, cutoff) do |clients|
+            i, n = 0, clients.size
+            next release_lock.call if i == n
 
-          clients.each do |client_id|
-            destroy_client(client_id) do
-              i += 1
-              release_lock.call if i == n
+            clients.each do |client_id|
+              destroy_client(client_id) do
+                i += 1
+                release_lock.call if i == n
+              end
             end
           end
         end
