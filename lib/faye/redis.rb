@@ -9,6 +9,8 @@ module Faye
     DEFAULT_GC   = 60
     LOCK_TIMEOUT = 120
 
+    @timeout_multiplier = 1.6
+
     def self.create(server, options)
       new(server, options)
     end
@@ -92,7 +94,7 @@ module Faye
 
     def client_exists(client_id, timeout_multiplier = 1.6, &callback)
       init
-      cutoff = get_current_time - (1000 * timeout_multiplier * @server.timeout)
+      @timeout_multiplier = timeout_multiplier
 
       @redis.zscore("#{@ns}/clients/#{client_id[0,1]}", client_id) do |score|
         callback.call(score.to_i > cutoff)
@@ -208,13 +210,16 @@ module Faye
       (Time.now.to_f * 1000).to_i
     end
 
+    def cutoff
+      get_current_time - ((1000 * @timeout_multiplier * @server.timeout)*3)
+    end
+
     def gc
       timeout = @server.timeout
       return unless Numeric === timeout
 
       'abcdefghijklmnopqrstuvwxyz1234567890'.each_char do |c|
         with_lock 'gc' do |release_lock|
-          cutoff = get_current_time - 1000 * 2 * timeout
           @redis.zrangebyscore("#{@ns}/clients/#{c}", 0, cutoff) do |clients|
             i, n = 0, clients.size
             next release_lock.call if i == n
